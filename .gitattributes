@@ -1,0 +1,34 @@
+# RIVOT ECU Monorepo — Line Ending Normalization
+# Ensures consistent line endings across Windows/Linux development environments
+
+# Default: normalize all text files to LF in the repo
+* text=auto eol=lf
+
+# Firmware source files — always LF
+*.c     text eol=lf
+*.h     text eol=lf
+*.s     text eol=lf
+*.ld    text eol=lf
+*.ioc   text eol=lf
+
+# KiCad hardware files — always LF
+*.kicad_sch  text eol=lf
+*.kicad_pcb  text eol=lf
+*.kicad_pro  text eol=lf
+
+# Documentation
+*.md    text eol=lf
+*.txt   text eol=lf
+
+# Windows scripts — keep CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Binary files — never touch line endings
+*.bin   binary
+*.elf   binary
+*.hex   binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.step  binary

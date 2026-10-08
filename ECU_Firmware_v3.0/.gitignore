@@ -1,0 +1,39 @@
+# ── Compiled Build Outputs & Artifacts ──
+Debug/
+Release/
+build/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+*.su
+*.d
+*.lst
+
+# ── STM32CubeIDE & Eclipse Metadata ──
+.metadata/
+.settings/
+*.launch
+.cproject
+.project
+*.mex
+
+# ── Local Editor Settings ──
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── SECURITY: Private Keys & Secrets (NEVER commit) ──
+*.pem
+*.key
+secrets.h
+credentials.json
+.env
+*.p12
+*.jks
+
+# ── OS Generated Files ──
+.DS_Store
+Thumbs.db
