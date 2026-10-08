@@ -44,6 +44,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DAC_HandleTypeDef hdac;
 
 CAN_HandleTypeDef hcan1;
 CAN_HandleTypeDef hcan2;
@@ -88,6 +89,7 @@ static void MX_DMA_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_DAC_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_IWDG_Init(void);
 void StartDefaultTask(void *argument);
@@ -203,37 +205,19 @@ static void Run_Hardware_Diagnostics(void) {
   }
 
   /* =========================================================================
-   * CHECK 4: BRAKE SENSOR ADC (PA4 — ANALOG mode)
-   * Do a single blocking conversion before RTOS starts.
-   * ADC=0    → sensor open circuit, D1/D2 diodes not connected, or 12V Aux off
-   * ADC=4095 → shorted to 3.3V rail
-   * 0<x<4095 → electrically connected (even if 12V Aux is off, value ~0 is
-   * normal)
+   * CHECK 4: BRAKE SWITCH INPUT (PA0) & REGEN DAC (PA4)
+   * PA0 is the digital Push-to-Off brake switch (PULLUP, idle=LOW, pulled=HIGH).
+   * PA4 is the DAC1 Channel 1 output driving the motor controller regen signal.
    * =========================================================================
    */
-  HAL_ADC_Start(&hadc1);
-  if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
-    uint16_t adc_boot = (uint16_t)HAL_ADC_GetValue(&hadc1);
-    HAL_ADC_Stop(&hadc1);
-    if (adc_boot == 4095) {
-      printf("[DIAG] Brake ADC  (PA4)  : WARN - Reads 4095 (SHORTED TO 3.3V! "
-             "Check D1/D2 and PA4 trace)\r\n");
-      warn_count++;
-    } else if (adc_boot == 0) {
-      printf("[DIAG] Brake ADC  (PA4)  : WARN - Reads 0 (sensor open or 12V "
-             "Aux off — known HW issue if 12V off)\r\n");
-      warn_count++;
-    } else {
-      printf("[DIAG] Brake ADC  (PA4)  : OK   - Reads %u (Sensor electrically "
-             "connected)\r\n",
-             adc_boot);
-    }
-  } else {
-    HAL_ADC_Stop(&hadc1);
-    printf("[DIAG] Brake ADC  (PA4)  : FAIL - PollForConversion timed out! "
-           "ADC1 hardware issue.\r\n");
+  GPIO_PinState brake_sw = HAL_GPIO_ReadPin(BRAKE_INP_GPIO_Port, BRAKE_INP_Pin);
+  printf("[DIAG] Brake Sw   (PA0)  : %s%s\r\n",
+         (brake_sw == GPIO_PIN_SET) ? "PULLED (HIGH)" : "RELEASED (LOW)",
+         (brake_sw == GPIO_PIN_SET) ? " <-- WARN: brake lever pulled at boot!" : "");
+  if (brake_sw == GPIO_PIN_SET)
     warn_count++;
-  }
+
+  printf("[DIAG] Regen DAC  (PA4)  : OK   - Initialized at 0.8V (Brake Released setpoint)\r\n");
 
   /* =========================================================================
    * CHECK 5: SWITCH & INPUT PINS (all are plain GPIO INPUT — valid to read)
@@ -291,24 +275,36 @@ static void Run_Hardware_Diagnostics(void) {
          (sw == GPIO_PIN_SET) ? "ON" : "OFF");
 
   /* =========================================================================
-   * CHECK 5b: CONTACTOR FEEDBACK (PA3 — PULLUP, active LOW)
-   * PA3 is the Auxiliary Contact of the HV Contactor relay.
+   * CHECK 5b: CONTACTOR FEEDBACK (PB3 — PULLUP, active LOW)
+   * PB3 is the Auxiliary Contact of the HV Contactor relay.
    * At boot, the MOSFET is OFF, so the contactor MUST be open.
    * Expected state = HIGH (3.3V via pull-up = contactor open = safe).
-   * If PA3 reads LOW at boot, the contactor contacts are WELDED SHUT!
+   * If PB3 reads LOW at boot, the contactor contacts are WELDED SHUT!
    * This is a critical hardware fault — HV battery is permanently connected.
    * =========================================================================
    */
   GPIO_PinState contactor_fb =
       HAL_GPIO_ReadPin(CONTACTOR_FEEDBACK_GPIO_Port, CONTACTOR_FEEDBACK_Pin);
   if (contactor_fb == GPIO_PIN_SET) {
-    printf("[DIAG] Contactor  (PA3)  : OK   - Feedback HIGH (Contactor OPEN,"
+    printf("[DIAG] Contactor  (PB3)  : OK   - Feedback HIGH (Contactor OPEN,"
            " safe)\r\n");
   } else {
-    printf("[DIAG] Contactor  (PA3)  : FATAL - Feedback LOW! CONTACTOR MAY BE"
+    printf("[DIAG] Contactor  (PB3)  : FATAL - Feedback LOW! CONTACTOR MAY BE"
            " WELDED SHUT! HV IS LIVE!\r\n");
     warn_count++;
   }
+
+  /* =========================================================================
+   * CHECK 5c: CP LINE CHARGER GUN DETECT (PB7 — PULLUP, active LOW)
+   * Gun Connected: LOW (CP and AUX2 shorted)
+   * Gun Disconnected: HIGH
+   * =========================================================================
+   */
+  GPIO_PinState cp_state =
+      HAL_GPIO_ReadPin(CP_LINE_DETECT_GPIO_Port, CP_LINE_DETECT_Pin);
+  printf("[DIAG] Charger CP (PB7)  : %s (Gun %s)\r\n",
+         (cp_state == GPIO_PIN_RESET) ? "LOW " : "HIGH",
+         (cp_state == GPIO_PIN_RESET) ? "CONNECTED" : "DISCONNECTED");
 
   /* =========================================================================
    * CHECK 6: MOSFET OUTPUT READBACK
@@ -393,17 +389,18 @@ int main(void) {
   MX_USART3_UART_Init();
   MX_CAN2_Init();
   MX_ADC1_Init();
+  MX_DAC_Init();
   MX_CAN1_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
-  /* Manually initialize USART2 for TX only (PA2) because CubeMX disabled it.
-   * This completely avoids the PA3 conflict. */
+  /* Initialize USART2 for full duplex (PA2 TX, PA3 RX) */
   Custom_USART2_UART_Init();
 
   printf("\r\n================================\r\n");
   printf("  ECU BOOT SEQUENCE INITIATED   \r\n");
   printf("================================\r\n");
   printf("[SYS] GPIO + DMA + USART2 Initialized\r\n");
+  printf("[SYS] DAC1 Initialized (Regen Control on PA4)\r\n");
   printf("[SYS] ADC1 Initialized\r\n");
   printf("[SYS] CAN1 + CAN2 Initialized\r\n");
   printf("[SYS] USART3 (VCU Comms) Initialized\r\n");
@@ -837,19 +834,11 @@ static void MX_GPIO_Init(void) {
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : CONTACTOR_FEEDBACK_Pin CP_LINE_DETECT_Pin */
-  GPIO_InitStruct.Pin = CONTACTOR_FEEDBACK_Pin | CP_LINE_DETECT_Pin;
+  /*Configure GPIO pin : BRAKE_INP_Pin */
+  GPIO_InitStruct.Pin = BRAKE_INP_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(BRAKE_INP_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : TAIL_LAMP_Pin */
   GPIO_InitStruct.Pin = TAIL_LAMP_Pin;
@@ -858,8 +847,9 @@ static void MX_GPIO_Init(void) {
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(TAIL_LAMP_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RIGHT_IND_SW_Pin OFF_INDICATOR_INP_Pin */
-  GPIO_InitStruct.Pin = RIGHT_IND_SW_Pin | OFF_INDICATOR_INP_Pin;
+  /*Configure GPIO pins : RIGHT_IND_SW_Pin OFF_INDICATOR_INP_Pin CONTACTOR_FEEDBACK_Pin CP_LINE_DETECT_Pin */
+  GPIO_InitStruct.Pin = RIGHT_IND_SW_Pin | OFF_INDICATOR_INP_Pin |
+                        CONTACTOR_FEEDBACK_Pin | CP_LINE_DETECT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -887,35 +877,63 @@ static void MX_GPIO_Init(void) {
 
 /* USER CODE BEGIN 4 */
 /* =========================================================================
- * CUSTOM USART2 INITIALIZATION (Bypasses CubeMX limitation)
- * Enables PA2 as TX and leaves PA3 untouched (for GPIO use).
+ * USART2 INITIALIZATION (Full Duplex: PA2 TX, PA3 RX)
  * ========================================================================= */
 void Custom_USART2_UART_Init(void) {
   /* 1. Enable Clocks */
   __HAL_RCC_USART2_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
-  /* 2. Configure PA2 as USART2_TX (Alternate Function 7) */
+  /* 2. Configure PA2 (TX) and PA3 (RX) as USART2 (Alternate Function 7) */
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  GPIO_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /* 3. Initialize UART peripheral for TX only */
+  /* 3. Initialize UART peripheral for full duplex (TX & RX) */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX;
+  huart2.Init.Mode = UART_MODE_TX_RX;
   huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart2.Init.OverSampling = UART_OVERSAMPLING_16;
   if (HAL_UART_Init(&huart2) != HAL_OK) {
     Error_Handler();
   }
+}
+
+/**
+ * @brief DAC Initialization Function (PA4 = DAC1 Channel 1)
+ * Drives regenerative braking control voltage to motor controller.
+ */
+static void MX_DAC_Init(void) {
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /* Enable DAC clock */
+  __HAL_RCC_DAC_CLK_ENABLE();
+
+  hdac.Instance = DAC;
+  if (HAL_DAC_Init(&hdac) != HAL_OK) {
+    Error_Handler();
+  }
+
+  /* Configure DAC channel 1 (PA4) */
+  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
+    Error_Handler();
+  }
+
+  /* Start DAC Channel 1 */
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+
+  /* Set initial voltage: 0.8V (Brake Released setpoint) */
+  HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, BRAKE_REGEN_DAC_VAL_RELEASED);
 }
 
 /* Route printf output to UART2 (ESP32 debug link, TX only to PA2). */

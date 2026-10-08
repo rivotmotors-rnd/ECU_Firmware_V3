@@ -66,22 +66,26 @@ void MX_FREERTOS_Init(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define BRAKE_INP_Pin GPIO_PIN_0
+#define BRAKE_INP_GPIO_Port GPIOA
 #define LEFT_IND_SW_Pin GPIO_PIN_0
 #define LEFT_IND_SW_GPIO_Port GPIOC
 #define SEAT_BTN_Pin GPIO_PIN_1
 #define SEAT_BTN_GPIO_Port GPIOC
 #define HANDLE_LOCK_Pin GPIO_PIN_2
 #define HANDLE_LOCK_GPIO_Port GPIOC
-#define CONTACTOR_FEEDBACK_Pin GPIO_PIN_3
-#define CONTACTOR_FEEDBACK_GPIO_Port GPIOA
-#define CP_LINE_DETECT_Pin GPIO_PIN_5
-#define CP_LINE_DETECT_GPIO_Port GPIOA
-#define TAIL_LAMP_Pin GPIO_PIN_6
-#define TAIL_LAMP_GPIO_Port GPIOA
 #define RIGHT_IND_SW_Pin GPIO_PIN_1
 #define RIGHT_IND_SW_GPIO_Port GPIOB
 #define OFF_INDICATOR_INP_Pin GPIO_PIN_2
 #define OFF_INDICATOR_INP_GPIO_Port GPIOB
+#define CONTACTOR_FEEDBACK_Pin GPIO_PIN_3
+#define CONTACTOR_FEEDBACK_GPIO_Port GPIOB
+#define HV_CONTACTOR_Pin GPIO_PIN_5
+#define HV_CONTACTOR_GPIO_Port GPIOB
+#define CP_LINE_DETECT_Pin GPIO_PIN_7
+#define CP_LINE_DETECT_GPIO_Port GPIOB
+#define TAIL_LAMP_Pin GPIO_PIN_6
+#define TAIL_LAMP_GPIO_Port GPIOA
 #define VCU_PWR_Pin GPIO_PIN_14
 #define VCU_PWR_GPIO_Port GPIOB
 #define AUX_12V_EN_Pin GPIO_PIN_15
@@ -96,8 +100,6 @@ void MX_FREERTOS_Init(void);
 #define LEFT_IND_LAMP_GPIO_Port GPIOC
 #define RIGHT_IND_LAMP_Pin GPIO_PIN_12
 #define RIGHT_IND_LAMP_GPIO_Port GPIOC
-#define HV_CONTACTOR_Pin GPIO_PIN_5
-#define HV_CONTACTOR_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 #include "ecu_config.h"

@@ -88,6 +88,25 @@
 // 5. VEHICLE INPUTS & SWITCHES
 // =============================================================================
 
+// Push-to-Off Digital Brake Switch (PA0, internal pull-up)
+// Released at rest (contacts closed to GND) -> LOW (0V)
+// Pulled / engaged (contacts open, pulled to 3.3V) -> HIGH (3.3V)
+#define BRAKE_INP_PIN               GPIO_PIN_0
+#define BRAKE_INP_PORT              GPIOA       // PA0
+#define BRAKE_INP                   BRAKE_INP_PIN
+
+// Contactor Weld Auxiliary Feedback (PB3, internal pull-up)
+// Contactor OPEN: HIGH (safe)
+// Contactor CLOSED/WELDED: LOW
+#define CONTACTOR_FEEDBACK_PIN      GPIO_PIN_3
+#define CONTACTOR_FEEDBACK_PORT     GPIOB       // PB3
+
+// CP Line Gun Detect (PB7, internal pull-up)
+// Gun Connected: LOW
+// Gun Disconnected: HIGH
+#define CP_LINE_DETECT_PIN          GPIO_PIN_7
+#define CP_LINE_DETECT_PORT         GPIOB       // PB7
+
 // Left Turn Indicator Switch
 #define LEFT_INDICATOR_INP_PIN      GPIO_PIN_0
 #define LEFT_INDICATOR_INP_PORT     GPIOC       // PC0
@@ -117,12 +136,18 @@
 #define HIGH_BEAM_PORT              GPIOC       // PC8
 
 // =============================================================================
-// 6. ANALOG INPUTS (ADC)
+// 6. REGENERATIVE BRAKING ANALOG OUTPUT (DAC)
 // =============================================================================
 
-// Regenerative Braking / Throttle Hall Sensor
-#define BRAKE_REGEN_ADC_PIN         GPIO_PIN_4
-#define BRAKE_REGEN_ADC_PORT        GPIOA       // PA4
-#define BRAKE_REGEN_OP_CH           ADC_CHANNEL_4
+// Regenerative Braking Signal to Motor Controller (PA4 -> LM358 Buffer)
+#define BRAKE_REGEN_DAC_PIN         GPIO_PIN_4
+#define BRAKE_REGEN_DAC_PORT        GPIOA       // PA4
+#define BRAKE_REGEN_DAC_CH          DAC_CHANNEL_1
+
+// 12-bit DAC Counts for 3.3V VREF: (Target_Voltage / 3.3V) * 4095
+// Brake Released: 0.8V -> (0.8 / 3.3) * 4095 = 993 counts
+// Brake Pulled:   2.5V -> (2.5 / 3.3) * 4095 = 3102 counts
+#define BRAKE_REGEN_DAC_VAL_RELEASED 993U
+#define BRAKE_REGEN_DAC_VAL_PULLED   3102U
 
 #endif // ECU_CONFIG_H

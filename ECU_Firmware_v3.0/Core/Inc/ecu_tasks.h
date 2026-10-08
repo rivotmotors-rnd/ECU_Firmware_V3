@@ -80,8 +80,8 @@ void VehicleLightingTask(void *argument);
 void SeatUnlockButtonTask(void *argument);
 
 /**
- * @brief  Samples Analog Hall Effect sensor via ADC1 to detect brake lever pull
- *         and controls the physical Tail Lamp.
+ * @brief  Monitors digital Push-to-Off brake switch (PA0), drives Tail Lamp
+ *         (PA6) and generates motor controller Regen DAC voltage (PA4).
  */
 void BrakeMonitorTask(void *argument);
 

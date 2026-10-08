@@ -47,6 +47,7 @@ uint32_t cycle_count = 0;
 extern osMessageQueueId_t vcuCommandQueue;
 extern osMessageQueueId_t actuatorCommandQueue;
 extern ADC_HandleTypeDef hadc1;
+extern DAC_HandleTypeDef hdac;
 
 #define TX_BYTE_QUEUE_SIZE 8192
 extern uint8_t tx_byte_queue[TX_BYTE_QUEUE_SIZE];
@@ -500,69 +501,51 @@ void SeatUnlockButtonTask(void *argument) {
 /* 5. BRAKE MONITOR TASK                                                     */
 /* ========================================================================= */
 /**
- * @brief Monitors the analog voltage from the brake lever's Hall Effect sensor.
- *        The diodes (D1, D2) OR the left/right brake signals into PA4 (ADC).
- *        When the voltage crosses BRAKE_THRESHOLD_ON, we consider the brake
- * "Pulled" and turn on the physical Tail Lamp (PA6).
+ * @brief Monitors the digital Push-to-Off brake switch on PA0.
+ *        - Switch released (at rest): contacts closed to GND (LOW) -> Tail Lamp OFF, DAC = 0.8V
+ *        - Switch pulled (engaged): contacts open, pulled to 3.3V (HIGH) -> Tail Lamp ON, DAC = 2.5V
  */
 void BrakeMonitorTask(void *argument) {
   osDelay(50);
-  printf("[TASK] Brake Monitor Started\r\n");
-  uint16_t adc_value = 0;
-  uint8_t output_state = 0, high_count = 0, low_count = 0;
-  HAL_GPIO_WritePin(TAIL_LAMP_SIG_OP_PORT, TAIL_LAMP_SIG_OP, GPIO_PIN_RESET);
+  printf("[TASK] Brake Monitor Started (Push-to-Off Switch PA0, Regen DAC PA4)\r\n");
+  uint8_t brake_state = 0; /* 0 = Released, 1 = Pulled */
+  uint8_t high_count = 0, low_count = 0;
 
-  /* Debug removed: Baseline confirmed (Released=~490, Pulled=~1800) */
+  /* Initialize outputs to released state */
+  HAL_GPIO_WritePin(TAIL_LAMP_SIG_OP_PORT, TAIL_LAMP_SIG_OP, GPIO_PIN_RESET);
+  HAL_DAC_SetValue(&hdac, BRAKE_REGEN_DAC_CH, DAC_ALIGN_12B_R, BRAKE_REGEN_DAC_VAL_RELEASED);
 
   for (;;) {
-    HAL_ADC_Start(&hadc1);
+    GPIO_PinState pin_state = HAL_GPIO_ReadPin(BRAKE_INP_PORT, BRAKE_INP_PIN);
 
-    uint32_t start_tick = osKernelGetTickCount();
-    HAL_StatusTypeDef status;
-    do {
-      status = HAL_ADC_PollForConversion(&hadc1, 0);
-      if (status == HAL_OK)
-        break;
-      osDelay(1);
-    } while (osKernelGetTickCount() - start_tick < 2);
-
-    if (status == HAL_OK) {
-      adc_value = HAL_ADC_GetValue(&hadc1);
-      HAL_ADC_Stop(&hadc1);
-
-      if (output_state == 0) {
-        if (adc_value > BRAKE_THRESHOLD_ON) {
-          high_count++;
-          low_count = 0;
-          if (high_count >= 3) {
-            output_state = 1;
-            printf("[BRAKE] Pulled! (ADC: %d)\r\n", adc_value);
-            HAL_GPIO_WritePin(TAIL_LAMP_SIG_OP_PORT, TAIL_LAMP_SIG_OP,
-                              GPIO_PIN_SET);
-            high_count = 0;
-          }
-        } else {
-          high_count = 0;
+    if (pin_state == GPIO_PIN_SET) {
+      /* Lever pulled: contacts opened, pulled high */
+      high_count++;
+      low_count = 0;
+      if (high_count >= 3) {
+        if (brake_state == 0) {
+          brake_state = 1;
+          printf("[BRAKE] Pulled! (Regen DAC -> 2.5V)\r\n");
+          HAL_GPIO_WritePin(TAIL_LAMP_SIG_OP_PORT, TAIL_LAMP_SIG_OP, GPIO_PIN_SET);
+          HAL_DAC_SetValue(&hdac, BRAKE_REGEN_DAC_CH, DAC_ALIGN_12B_R, BRAKE_REGEN_DAC_VAL_PULLED);
         }
-      } else {
-        if (adc_value < BRAKE_THRESHOLD_OFF) {
-          low_count++;
-          high_count = 0;
-          if (low_count >= 3) {
-            output_state = 0;
-            printf("[BRAKE] Released (ADC: %d)\r\n", adc_value);
-            HAL_GPIO_WritePin(TAIL_LAMP_SIG_OP_PORT, TAIL_LAMP_SIG_OP,
-                              GPIO_PIN_RESET);
-            low_count = 0;
-          }
-        } else {
-          low_count = 0;
-        }
+        high_count = 3;
       }
     } else {
-      HAL_ADC_Stop(&hadc1);
+      /* Lever released: contacts closed to ground */
+      low_count++;
+      high_count = 0;
+      if (low_count >= 3) {
+        if (brake_state == 1) {
+          brake_state = 0;
+          printf("[BRAKE] Released (Regen DAC -> 0.8V)\r\n");
+          HAL_GPIO_WritePin(TAIL_LAMP_SIG_OP_PORT, TAIL_LAMP_SIG_OP, GPIO_PIN_RESET);
+          HAL_DAC_SetValue(&hdac, BRAKE_REGEN_DAC_CH, DAC_ALIGN_12B_R, BRAKE_REGEN_DAC_VAL_RELEASED);
+        }
+        low_count = 3;
+      }
     }
 
-    osDelay(50);
+    osDelay(20);
   }
 }

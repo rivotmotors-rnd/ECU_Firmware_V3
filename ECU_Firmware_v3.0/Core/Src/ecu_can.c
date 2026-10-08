@@ -157,10 +157,10 @@ void CanHealthMonitorTask(void *argument) {
      * 2. CONTACTOR SAFETY LOGIC
      * --------------------------------------------------------- */
     /* Condition 1: Physical connection (CP and AUX2 shorted together, pulling
-     * PA3 LOW - Temporarily using CONTACTOR_FEEDBACK_Pin instead of PA5) */
+     * CP_LINE_DETECT_Pin (PB7) LOW) */
     bool condition_physical =
-        (HAL_GPIO_ReadPin(CONTACTOR_FEEDBACK_GPIO_Port,
-                          CONTACTOR_FEEDBACK_Pin) == GPIO_PIN_RESET);
+        (HAL_GPIO_ReadPin(CP_LINE_DETECT_GPIO_Port,
+                          CP_LINE_DETECT_Pin) == GPIO_PIN_RESET);
 
     /* --- CAN1 Power Management (Bounce-Proof) --- */
     if (condition_physical && !can1_is_running) {
@@ -237,7 +237,7 @@ void CanHealthMonitorTask(void *argument) {
     }
 
     /* =====================================================================
-     * CONTACTOR WELDING DETECTION (PA3 = CONTACTOR_FEEDBACK)
+     * CONTACTOR WELDING DETECTION (PB3 = CONTACTOR_FEEDBACK)
      * ---------------------------------------------------------------------
      * If the MOSFET is OFF but the feedback pin still reads LOW (GND),
      * it means the physical relay contacts are fused/welded shut.
@@ -254,13 +254,9 @@ void CanHealthMonitorTask(void *argument) {
      * triggers a false positive! */
     if (!virtual_contactor_closed &&
         (HAL_GetTick() - contactor_last_open_time > 2000)) {
-      /* =================================================================
-       * DEMO ONLY: Hardcoding feedback to GPIO_PIN_SET.
-       * Because you wired CP Line to PA3, and PA3 is also the
-       * CONTACTOR_FEEDBACK_Pin, the ECU falsely thinks the contactor
-       * is welded shut when you plug the gun in!
-       * ================================================================= */
-      uint8_t feedback = GPIO_PIN_SET;
+      /* Sample mirror auxiliary contact on PB3 */
+      GPIO_PinState feedback =
+          HAL_GPIO_ReadPin(CONTACTOR_FEEDBACK_GPIO_Port, CONTACTOR_FEEDBACK_Pin);
       if (feedback == GPIO_PIN_RESET) {
         if (!has_alerted_welding) {
           printf("\r\n[FATAL] CONTACTOR WELDING DETECTED! HV IS PERMANENTLY"
@@ -281,9 +277,10 @@ void CanHealthMonitorTask(void *argument) {
           has_alerted_welding = true;
         }
       } else {
-        /* If for some miraculous reason the contactor un-welds itself, reset
-         * the alert flag */
-        has_alerted_welding = false;
+        /* Contacts confirmed OPEN, reset alert if state recovered */
+        if (has_alerted_welding) {
+          has_alerted_welding = false;
+        }
       }
     }
 
